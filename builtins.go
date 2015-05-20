@@ -20,37 +20,55 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 // nonzero tests whether a variable value non-zero
 // as defined by the golang spec.
 func nonzero(v interface{}, param string) error {
 	st := reflect.ValueOf(v)
-	valid := true
 	switch st.Kind() {
 	case reflect.String:
-		valid = len(st.String()) != 0
-	case reflect.Ptr, reflect.Interface:
-		valid = !st.IsNil()
+		if len(st.String()) == 0 {
+			return ErrEmptyValue
+		}
 	case reflect.Slice, reflect.Map, reflect.Array:
-		valid = st.Len() != 0
+		if st.Len() == 0 {
+			return ErrEmptyValue
+		}
+	case reflect.Ptr, reflect.Interface:
+		if st.IsNil() {
+			return ErrZeroValue
+		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		valid = st.Int() != 0
+		if st.Int() == 0 {
+			return ErrZeroValue
+		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		valid = st.Uint() != 0
+		if st.Uint() == 0 {
+			return ErrZeroValue
+		}
 	case reflect.Float32, reflect.Float64:
-		valid = st.Float() != 0
+		if st.Float() == 0 {
+			return ErrZeroValue
+		}
 	case reflect.Bool:
-		valid = st.Bool()
+		if !st.Bool() {
+			return ErrZeroValue
+		}
 	case reflect.Invalid:
-		valid = false // always invalid
+		return ErrZeroValue
 	default:
-		return ErrUnsupported
+		switch st.Type() {
+		case timeType:
+			if st.Interface().(time.Time).IsZero() {
+				return ErrZeroValue
+			}
+		default:
+			return ErrUnsupported
+		}
 	}
 
-	if !valid {
-		return ErrZeroValue
-	}
 	return nil
 }
 

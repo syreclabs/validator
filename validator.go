@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -43,9 +44,12 @@ func (t TextErr) MarshalText() ([]byte, error) {
 }
 
 var (
-	// ErrZeroValue is the error returned when variable has zero valud
+	// ErrZeroValue is the error returned when variable has zero value
 	// and nonzero was specified
 	ErrZeroValue = TextErr{errors.New("zero value")}
+	// ErrEmptyValue is the error returned when string variable has zero length
+	// and nonzero was specified
+	ErrEmptyValue = TextErr{errors.New("empty value")}
 	// ErrMin is the error returned when variable is less than mininum
 	// value specified
 	ErrMin = TextErr{errors.New("less than min")}
@@ -121,11 +125,12 @@ func NewValidator() *Validator {
 	return &Validator{
 		tagName: "validate",
 		validationFuncs: map[string]ValidationFunc{
-			"nonzero": nonzero,
-			"len":     length,
-			"min":     min,
-			"max":     max,
-			"regexp":  regex,
+			"nonzero":  nonzero,
+			"required": nonzero,
+			"len":      length,
+			"min":      min,
+			"max":      max,
+			"regexp":   regex,
 		},
 	}
 }
@@ -210,42 +215,28 @@ func (mv *Validator) Validate(v interface{}) error {
 	m := make(ErrorMap)
 	for i := 0; i < nfields; i++ {
 		f := sv.Field(i)
+		ft := st.Field(i)
 		// deal with pointers
 		for f.Kind() == reflect.Ptr && !f.IsNil() {
 			f = f.Elem()
 		}
-		tag := st.Field(i).Tag.Get(mv.tagName)
-		if f.Kind() == reflect.Ptr {
-			ff := f.Elem()
-			if ff.Kind() == reflect.Struct {
-
-			}
-		}
+		tag := ft.Tag.Get(mv.tagName)
 		if tag == "-" {
 			continue
 		}
 		if tag == "" && f.Kind() != reflect.Struct {
 			continue
 		}
-		// if field has json tag, use that as a field name
-		fname := st.Field(i).Tag.Get("json")
-		if fname == "" {
-			fname = st.Field(i).Name
+		fname := ft.Name
+		// if field has json tag, use that as a error map key
+		fkey := ft.Tag.Get("json")
+		if fkey == "" {
+			fkey = fname
 		}
-		var errs ErrorArray
-		switch f.Kind() {
-		case reflect.Struct:
-			if !unicode.IsUpper(rune(fname[0])) {
-				continue
-			}
-			e := mv.Validate(f.Interface())
-			if e, ok := e.(ErrorMap); ok && len(e) > 0 {
-				for j, k := range e {
-					m[fname+"."+j] = k
-				}
-			}
 
-		default:
+		var errs ErrorArray
+		if isVarValue(f) {
+			// validate field value
 			err := mv.Valid(f.Interface(), tag)
 			if errors, ok := err.(ErrorArray); ok {
 				errs = errors
@@ -254,12 +245,24 @@ func (mv *Validator) Validate(v interface{}) error {
 					errs = ErrorArray{err}
 				}
 			}
+		} else {
+			// do not bother validating if unexported
+			if !unicode.IsUpper(rune(fname[0])) {
+				continue
+			}
+			// recursively validate field struct
+			e := mv.Validate(f.Interface())
+			if e, ok := e.(ErrorMap); ok && len(e) > 0 {
+				for j, k := range e {
+					m[fkey+"."+j] = k
+				}
+			}
 		}
-
 		if len(errs) > 0 {
-			m[fname] = errs
+			m[fkey] = errs
 		}
 	}
+
 	if len(m) > 0 {
 		return m
 	}
@@ -282,16 +285,36 @@ func (mv *Validator) Valid(val interface{}, tags string) error {
 	if v.Kind() == reflect.Ptr && !v.IsNil() {
 		return mv.Valid(v.Elem().Interface(), tags)
 	}
+	if !isVarValue(v) {
+		return ErrUnsupported
+	}
 	var err error
 	switch v.Kind() {
-	case reflect.Struct:
-		return ErrUnsupported
+	// case reflect.Struct:
+	// 	return ErrUnsupported
 	case reflect.Invalid:
 		err = mv.validateVar(nil, tags)
 	default:
 		err = mv.validateVar(val, tags)
 	}
 	return err
+}
+
+var (
+	timeType = reflect.TypeOf(time.Time{})
+
+	varTypes = map[reflect.Type]bool{
+		timeType: true,
+	}
+)
+
+// isVarValue returns true if v can be validated with validateVar
+func isVarValue(v reflect.Value) bool {
+	if v.Kind() == reflect.Struct {
+		_, ok := varTypes[v.Type()]
+		return ok
+	}
+	return true
 }
 
 // validateVar validates one single variable
