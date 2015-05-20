@@ -227,7 +227,11 @@ func (mv *Validator) Validate(v interface{}) error {
 		if tag == "" && f.Kind() != reflect.Struct {
 			continue
 		}
-		fname := st.Field(i).Name
+		// if field has json tag, use that as a field name
+		fname := st.Field(i).Tag.Get("json")
+		if fname == "" {
+			fname = st.Field(i).Name
+		}
 		var errs ErrorArray
 		switch f.Kind() {
 		case reflect.Struct:
@@ -253,7 +257,7 @@ func (mv *Validator) Validate(v interface{}) error {
 		}
 
 		if len(errs) > 0 {
-			m[st.Field(i).Name] = errs
+			m[fname] = errs
 		}
 	}
 	if len(m) > 0 {
