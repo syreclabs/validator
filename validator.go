@@ -214,21 +214,24 @@ func (mv *Validator) Validate(v interface{}) error {
 	nfields := sv.NumField()
 	m := make(ErrorMap)
 	for i := 0; i < nfields; i++ {
-		f := sv.Field(i)
 		ft := st.Field(i)
-		// deal with pointers
+		f := sv.Field(i)
 		for f.Kind() == reflect.Ptr && !f.IsNil() {
 			f = f.Elem()
 		}
+
 		tag := ft.Tag.Get(mv.tagName)
+		// skip excluded fields
 		if tag == "-" {
 			continue
 		}
-		if tag == "" && f.Kind() != reflect.Struct {
+		// skip "var" fields without validation tags
+		if tag == "" && isVarValue(f) {
 			continue
 		}
+
 		fname := ft.Name
-		// if field has json tag, use that as a error map key
+		// if field has json tag, use that as an error map key
 		fkey := ft.Tag.Get("json")
 		if fkey == "" {
 			fkey = fname
